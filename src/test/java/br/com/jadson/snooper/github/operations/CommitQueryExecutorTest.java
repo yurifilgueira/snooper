@@ -4,12 +4,14 @@ import br.com.jadson.snooper.github.data.association.AssociationCommitPullReques
 import br.com.jadson.snooper.github.data.commit.GitHubCommitInfo;
 import br.com.jadson.snooper.github.data.stats.GitHubCommitStatsInfo;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
 import java.time.Month;
 import java.util.List;
 
+@Disabled
 class CommitQueryExecutorTest {
 
     // To Execute this code
@@ -72,6 +74,7 @@ class CommitQueryExecutorTest {
      * THis test can not run bacause need a github token to be execute
      */
     @Test
+    @Disabled
     void getHistoryOfCommitsWithPullRequestsQuery() {
 
         CommitQueryExecutor commitExecutor = new CommitQueryExecutor();
@@ -92,6 +95,7 @@ class CommitQueryExecutorTest {
     * Tests fetching commits with their stats for a repository within a given date range.
     * */
     @Test
+    @Disabled
     void testGetCommitsWithStats() {
         CommitQueryExecutor commitExecutor = new CommitQueryExecutor();
         commitExecutor.setGithubToken(token);

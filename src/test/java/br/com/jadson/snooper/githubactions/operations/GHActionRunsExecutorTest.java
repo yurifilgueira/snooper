@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import java.time.LocalDateTime;
 import java.util.List;
 
+@Disabled
 class GHActionRunsExecutorTest {
 
     // To Execute this code

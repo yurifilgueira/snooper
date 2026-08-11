@@ -2,8 +2,10 @@ package br.com.jadson.snooper.github.operations;
 
 import br.com.jadson.snooper.github.data.repo.GitHubRepoInfo;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
+@Disabled
 class RepoQueryExecutorTest {
 
     // To Execute this code

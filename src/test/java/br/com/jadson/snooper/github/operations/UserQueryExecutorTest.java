@@ -11,6 +11,7 @@ package br.com.jadson.snooper.github.operations;
 
 import br.com.jadson.snooper.github.data.users.GitHubUserInfo;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 
@@ -19,6 +20,7 @@ import org.junit.jupiter.api.Test;
  *
  * @author Jadson Santos - jadson.santos@ufrn.br
  */
+@Disabled
 class UserQueryExecutorTest {
 
     // To Execute this code

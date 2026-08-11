@@ -17,6 +17,7 @@ import java.util.List;
  *
  * @author Jadson Santos - jadson.santos@ufrn.br
  */
+@Disabled
 class GitHubSearchExecutorTest {
 
     // To Execute this code

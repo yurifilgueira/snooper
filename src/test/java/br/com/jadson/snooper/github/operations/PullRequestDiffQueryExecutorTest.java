@@ -2,9 +2,10 @@ package br.com.jadson.snooper.github.operations;
 
 import br.com.jadson.snooper.github.data.diff.GitHubPullRequestDiffInfo;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
-
+@Disabled
 class PullRequestDiffQueryExecutorTest {
 
     // To Execute this code

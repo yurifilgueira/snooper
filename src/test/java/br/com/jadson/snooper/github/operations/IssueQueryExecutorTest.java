@@ -2,12 +2,14 @@ package br.com.jadson.snooper.github.operations;
 
 import br.com.jadson.snooper.github.data.issue.GitHubIssueInfo;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.List;
 
+@Disabled
 class IssueQueryExecutorTest {
 
     // To Execute this code

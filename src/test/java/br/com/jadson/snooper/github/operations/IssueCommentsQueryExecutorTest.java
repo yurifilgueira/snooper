@@ -2,10 +2,12 @@ package br.com.jadson.snooper.github.operations;
 
 import br.com.jadson.snooper.github.data.comments.GithubIssueCommentsInfo;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
+@Disabled
 class IssueCommentsQueryExecutorTest {
 
     // To Execute this code
