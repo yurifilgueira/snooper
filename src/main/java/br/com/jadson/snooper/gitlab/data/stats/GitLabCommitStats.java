@@ -1,4 +1,4 @@
-package br.com.jadson.snooper.gitlab.data.commit;
+package br.com.jadson.snooper.gitlab.data.stats;
 
 /**
  * Statistics of changes made in a GitLab commit.

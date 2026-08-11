@@ -1,7 +1,8 @@
 package br.com.jadson.snooper.gitlab.data.commit;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import br.com.jadson.snooper.gitlab.data.stats.GitLabCommitStats;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import java.util.Date;
 import java.util.List;
 

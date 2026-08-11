@@ -472,7 +472,7 @@ public class CommitQueryExecutor extends AbstractGitHubQueryExecutor {
         GraphQLCommitResponse queryResult = executeCommitStatsQuery(query);
 
         GitHubFileStats gitHubFileStats = new GitHubFileStats();
-        gitHubFileStats.churn = queryResult.data.repository.defaultBranchRef.target.history.totalCount;
+        gitHubFileStats.commits = queryResult.data.repository.defaultBranchRef.target.history.totalCount;
         gitHubFileStats.path = filePath;
 
         return gitHubFileStats;
