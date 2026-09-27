@@ -37,7 +37,10 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Pull Request Diff Query
@@ -52,10 +55,18 @@ public class PullRequestDiffQueryExecutor extends AbstractGitHubQueryExecutor {
         super(githubToken);
     }
 
+    /**
+     * @deprecated use {@link #fetchPullRequestDiff(String, String, Long)}
+     */
+    @Deprecated(since = "3.0")
     public GitHubPullRequestDiffInfo pullRequestsDiff(String repoOwner, String repoName, Long pullNumber) {
         return pullRequestsDiff(repoOwner+"/"+repoName, pullNumber);
     }
 
+    /**
+     * @deprecated use {@link #fetchPullRequestDiff(String, Long)}, or {@link #fetchPullRequestDiffs(String, Collection)} for many PRs in parallel
+     */
+    @Deprecated(since = "3.0")
     public GitHubPullRequestDiffInfo pullRequestsDiff(String repoFullName, Long pullNumber) {
 
         validateRepoName(repoFullName);
@@ -77,6 +88,29 @@ public class PullRequestDiffQueryExecutor extends AbstractGitHubQueryExecutor {
 
         return result.getBody();
 
+    }
+
+    // @HttpExchange methods
+
+    public GitHubPullRequestDiffInfo fetchPullRequestDiff(String repoOwner, String repoName, Long pullNumber) {
+        return fetchPullRequestDiff(repoOwner + "/" + repoName, pullNumber);
+    }
+
+    // Diff statistics of a PR: additions, deletions, changed_files, commits
+    public GitHubPullRequestDiffInfo fetchPullRequestDiff(String repoFullName, Long pullNumber) {
+        return clients().rest().getPullRequestDiff(owner(repoFullName), name(repoFullName), pullNumber);
+    }
+
+    /**
+        Diff statistics of many PRs, fetched in parallel (one request per PR).
+
+        @return PR number -> diff statistics, in the order of the numbers
+     */
+    public Map<Long, GitHubPullRequestDiffInfo> fetchPullRequestDiffs(String repoFullName, Collection<Long> pullNumbers) {
+        String owner = owner(repoFullName), name = name(repoFullName);
+
+        System.out.println("Fetching diffs of " + pullNumbers.size() + " pull requests of " + repoFullName);
+        return fetchEach(new LinkedHashSet<>(pullNumbers), number -> clients().rest().getPullRequestDiff(owner, name, number));
     }
 
 }

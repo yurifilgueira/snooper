@@ -29,12 +29,16 @@ package br.com.jadson.snooper.github.operations;
 import br.com.jadson.snooper.github.client.GitHubClientFactory;
 import br.com.jadson.snooper.github.client.GitHubClients;
 import br.com.jadson.snooper.github.client.GitHubLinkHeader;
+import br.com.jadson.snooper.utils.DateUtils;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -259,6 +263,18 @@ public abstract class AbstractGitHubQueryExecutor {
         Map<K, V> result = new LinkedHashMap<>();
         for (int i = 0; i < orderedKeys.size(); i++)
             result.put(orderedKeys.get(i), values.get(i));
+        return result;
+    }
+
+    // Keeps the items whose date (in the system time zone) is between start and end, inclusive. Items without date are skipped
+    protected static <T> List<T> filterByDate(List<T> items, Function<T, Date> date, LocalDateTime start, LocalDateTime end) {
+        DateUtils dateUtils = new DateUtils();
+        List<T> result = new ArrayList<>();
+        for (T item : items) {
+            Date value = date.apply(item);
+            if (value != null && dateUtils.isBetweenDates(LocalDateTime.ofInstant(value.toInstant(), ZoneId.systemDefault()), start, end))
+                result.add(item);
+        }
         return result;
     }
 

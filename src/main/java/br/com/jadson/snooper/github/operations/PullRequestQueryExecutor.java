@@ -40,7 +40,9 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Queries about Pull Request
@@ -55,6 +57,10 @@ public class PullRequestQueryExecutor extends AbstractGitHubQueryExecutor {
         super(githubToken);
     }
 
+    /**
+     * @deprecated use {@link #fetchPullRequests(String, String)}, which fetches the pages in parallel
+     */
+    @Deprecated(since = "3.0")
     public List<GitHubPullRequestInfo> pullRequests(String repoOwner, String repoName) {
         return pullRequests(repoOwner+"/"+repoName);
     }
@@ -64,7 +70,9 @@ public class PullRequestQueryExecutor extends AbstractGitHubQueryExecutor {
      *
      * @param repoFullName
      * @return
+     * @deprecated use {@link #fetchPullRequests(String)}, which fetches the pages in parallel
      */
+    @Deprecated(since = "3.0")
     public List<GitHubPullRequestInfo> pullRequests(String repoFullName) {
 
         validateRepoName(repoFullName);
@@ -111,7 +119,9 @@ public class PullRequestQueryExecutor extends AbstractGitHubQueryExecutor {
      *
      * @param repoFullName
      * @return
+     * @deprecated use {@link #fetchPullRequest(String, int)}
      */
+    @Deprecated(since = "3.0")
     public GitHubPullRequestInfo pullRequest(String repoFullName, int pullNumber) {
 
         validateRepoName(repoFullName);
@@ -138,7 +148,9 @@ public class PullRequestQueryExecutor extends AbstractGitHubQueryExecutor {
      * @param start
      * @param end
      * @return
+     * @deprecated use {@link #fetchPullRequestsCreatedInPeriod(String, LocalDateTime, LocalDateTime)}
      */
+    @Deprecated(since = "3.0")
     public List<GitHubPullRequestInfo> pullRequestsCreatedInPeriod(String repoFullName, LocalDateTime start, LocalDateTime end) {
         
         List<GitHubPullRequestInfo> pullRequests = new ArrayList();
@@ -161,6 +173,10 @@ public class PullRequestQueryExecutor extends AbstractGitHubQueryExecutor {
     }
 
 
+    /**
+     * @deprecated use {@link #fetchPullRequestsClosedInPeriod(String, LocalDateTime, LocalDateTime)}
+     */
+    @Deprecated(since = "3.0")
     public List<GitHubPullRequestInfo> pullRequestsClosedInPeriod(String repoFullName, LocalDateTime start, LocalDateTime end) {
 
         List<GitHubPullRequestInfo> pullRequests = new ArrayList();
@@ -192,7 +208,9 @@ public class PullRequestQueryExecutor extends AbstractGitHubQueryExecutor {
      * @param repoFullName
      * @param sha
      * @return
+     * @deprecated use {@link #fetchPullRequestsAssociatedWithCommit(String, String)}
      */
+    @Deprecated(since = "3.0")
     public List<GitHubPullRequestInfo> listPullRequestsAssociatedwithCommit(String repoFullName, String sha) {
 
         validateRepoName(repoFullName);
@@ -311,7 +329,9 @@ public class PullRequestQueryExecutor extends AbstractGitHubQueryExecutor {
      *
      * @param repoFullName
      * @return
+     * @deprecated use {@link #fetchQtdPullRequests(String)}
      */
+    @Deprecated(since = "3.0")
     public int getQtdPullRequests(String repoFullName) {
 
         validateRepoName(repoFullName);
@@ -333,6 +353,68 @@ public class PullRequestQueryExecutor extends AbstractGitHubQueryExecutor {
         ResponseEntity<GitHubQTDPullRequestInfo> result = restTemplate.exchange( uri, HttpMethod.GET, entity, GitHubQTDPullRequestInfo.class);
 
         return result.getBody().total_count;
+    }
+
+    // @HttpExchange methods: pages are fetched in parallel on virtual threads
+
+    public List<GitHubPullRequestInfo> fetchPullRequests(String repoOwner, String repoName) {
+        return fetchPullRequests(repoOwner + "/" + repoName);
+    }
+
+    /**
+        Return all PRs of a project. Pages after the first one are fetched in parallel.
+
+        Use setQueryParameters(new String[]{"state=all"}) to bring closed PRs too.
+     */
+    public List<GitHubPullRequestInfo> fetchPullRequests(String repoFullName) {
+        String owner = owner(repoFullName), name = name(repoFullName);
+        PageParams params = pageParams();
+
+        System.out.println("Fetching pull requests of " + repoFullName);
+        return fetchAllPages(page -> clients().rest().listPullRequests(owner, name, params.forPage(page)));
+    }
+
+    // Return a specific PR of a project
+    public GitHubPullRequestInfo fetchPullRequest(String repoFullName, int pullNumber) {
+        return clients().rest().getPullRequest(owner(repoFullName), name(repoFullName), pullNumber);
+    }
+
+    // Return the PRs created between the dates (inclusive)
+    public List<GitHubPullRequestInfo> fetchPullRequestsCreatedInPeriod(String repoFullName, LocalDateTime start, LocalDateTime end) {
+        return filterByDate(fetchPullRequests(repoFullName), pr -> pr.created_at, start, end);
+    }
+
+    // Return the PRs closed between the dates (inclusive)
+    public List<GitHubPullRequestInfo> fetchPullRequestsClosedInPeriod(String repoFullName, LocalDateTime start, LocalDateTime end) {
+        return filterByDate(fetchPullRequests(repoFullName), pr -> pr.closed_at, start, end);
+    }
+
+    /**
+        Lists the merged pull request that introduced the commit to the repository.
+        If the commit is not present in the default branch, will only return open pull requests associated with the commit.
+
+        https://docs.github.com/en/rest/commits/commits?apiVersion=2022-11-28#list-pull-requests-associated-with-a-commit
+     */
+    public List<GitHubPullRequestInfo> fetchPullRequestsAssociatedWithCommit(String repoFullName, String sha) {
+        String owner = owner(repoFullName), name = name(repoFullName);
+        PageParams params = pageParams();
+
+        List<GitHubPullRequestInfo> all = fetchAllPages(page -> clients().rest().listPullRequestsOfCommit(owner, name, sha, params.forPage(page)));
+
+        // the old method stopped on a repeated PR, here repeated PRs are removed
+        Map<Long, GitHubPullRequestInfo> byId = new LinkedHashMap<>();
+        for (GitHubPullRequestInfo pr : all)
+            byId.putIfAbsent(pr.id, pr);
+        return new ArrayList<>(byId.values());
+    }
+
+    /**
+        Return the qtd of PULL Request of a project, using the search API (it has its own rate limit, 30 requests per minute).
+
+        https://docs.github.com/en/search-github/searching-on-github/searching-issues-and-pull-requests
+     */
+    public int fetchQtdPullRequests(String repoFullName) {
+        return clients().rest().searchIssues("type:pr repo:" + owner(repoFullName) + "/" + name(repoFullName), 1).total_count;
     }
 
 }
