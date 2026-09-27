@@ -5,14 +5,17 @@ plugins {
 group = 'br.com.jadson'
 version = '3.0'
 
+// compiles and tests with JDK 21 whatever JDK runs Gradle (JAVA_HOME can be 17+)
 java {
-	sourceCompatibility = JavaVersion.VERSION_21
-	targetCompatibility = JavaVersion.VERSION_21
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(21)
+	}
 }
 
 tasks.withType(JavaCompile).configureEach {
-	options.release = 21
 	options.encoding = 'UTF-8'
+	// @HttpExchange interfaces bind @PathVariable/@RequestParam by the parameter names
+	options.compilerArgs << '-parameters'
 }
 
 configurations {
@@ -60,6 +63,7 @@ dependencies {
 
 	// MockRestServiceServer for the @HttpExchange clients
 	testImplementation group: 'org.springframework', name: 'spring-test', version: '6.2.11'
+	testImplementation 'org.hamcrest:hamcrest:2.2'
 
 }
 

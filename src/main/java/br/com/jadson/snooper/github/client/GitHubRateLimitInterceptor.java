@@ -45,6 +45,9 @@ public class GitHubRateLimitInterceptor implements ClientHttpRequestInterceptor 
 
     private final Map<String, Quota> quotas = new ConcurrentHashMap<>();
 
+    // Called when GitHub answers 401 (token revoked or expired). Used to evict the token clients from the cache
+    private volatile Runnable onUnauthorized = () -> { };
+
     public GitHubRateLimitInterceptor() {
         this(DEFAULT_THRESHOLD, DEFAULT_MAX_RETRIES, d -> Thread.sleep(d.toMillis()), Clock.systemUTC());
     }
@@ -54,6 +57,17 @@ public class GitHubRateLimitInterceptor implements ClientHttpRequestInterceptor 
         this.maxRetries = maxRetries;
         this.sleeper = sleeper;
         this.clock = clock;
+    }
+
+    public void setOnUnauthorized(Runnable onUnauthorized) {
+        this.onUnauthorized = onUnauthorized == null ? () -> { } : onUnauthorized;
+    }
+
+    // Limits the in-flight requests of the token. Without it requests are not limited
+    private volatile ConcurrentFetcher concurrencyLimiter;
+
+    public void setConcurrencyLimiter(ConcurrentFetcher concurrencyLimiter) {
+        this.concurrencyLimiter = concurrencyLimiter;
     }
 
     @Override
@@ -69,10 +83,17 @@ public class GitHubRateLimitInterceptor implements ClientHttpRequestInterceptor 
                 sleep(wait);
             }
 
-            ClientHttpResponse response = execution.execute(request, body);
+            ConcurrentFetcher limiter = concurrencyLimiter;
+            ClientHttpResponse response = limiter == null
+                    ? execution.execute(request, body)
+                    : limiter.withPermit(() -> execution.execute(request, body));
             quota.update(response.getHeaders());
 
             int status = response.getStatusCode().value();
+
+            if (status == 401)
+                onUnauthorized.run();
+
             if ((status == 403 || status == 429) && attempt < maxRetries) {
                 Duration retryDelay = retryDelay(status, response.getHeaders(), attempt);
                 if (retryDelay != null) {
