@@ -8,7 +8,10 @@ import org.springframework.web.client.RestTemplate;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 
 /**
  * This return comments for Issues and also PRs.
@@ -38,7 +41,9 @@ public class IssueCommentsQueryExecutor extends AbstractGitHubQueryExecutor {
      *
      * @param repoFullName
      * @return
+     * @deprecated use {@link #fetchIssuesComments(String)}, which fetches the pages in parallel
      */
+    @Deprecated(since = "3.0")
     public List<GithubIssueCommentsInfo> getIssuesCommentsInfo(String repoFullName) {
 
         int page = 1;
@@ -93,7 +98,9 @@ public class IssueCommentsQueryExecutor extends AbstractGitHubQueryExecutor {
      *
      * @param repoFullName
      * @return
+     * @deprecated use {@link #fetchIssueComments(String, long)}, or {@link #fetchIssueComments(String, Collection)} for many issues in parallel
      */
+    @Deprecated(since = "3.0")
     public List<GithubIssueCommentsInfo> getIssueCommentsInfo(String repoFullName, long issueNumber) {
 
         int page = 1;
@@ -124,6 +131,35 @@ public class IssueCommentsQueryExecutor extends AbstractGitHubQueryExecutor {
 
         return allComments;
 
+    }
+
+    // @HttpExchange methods: pages and issues are fetched in parallel on virtual threads
+
+    // Return all Issues/PR comments of a repository
+    public List<GithubIssueCommentsInfo> fetchIssuesComments(String repoFullName) {
+        String owner = owner(repoFullName), name = name(repoFullName);
+        PageParams params = pageParams();
+
+        System.out.println("Fetching issue comments of " + repoFullName);
+        return fetchAllPages(page -> clients().rest().listIssueComments(owner, name, params.forPage(page)));
+    }
+
+    // Return all comments of an Issue or a PR
+    public List<GithubIssueCommentsInfo> fetchIssueComments(String repoFullName, long issueNumber) {
+        String owner = owner(repoFullName), name = name(repoFullName);
+        PageParams params = pageParams();
+
+        return fetchAllPages(page -> clients().rest().listCommentsOfIssue(owner, name, issueNumber, params.forPage(page)));
+    }
+
+    /**
+        Return the comments of many Issues/PRs. The issues and their pages are fetched in parallel.
+
+        @return issue number -> comments, in the order of the numbers
+     */
+    public Map<Long, List<GithubIssueCommentsInfo>> fetchIssueComments(String repoFullName, Collection<Long> issueNumbers) {
+        System.out.println("Fetching comments of " + issueNumbers.size() + " issues of " + repoFullName);
+        return fetchEach(new LinkedHashSet<>(issueNumbers), number -> fetchIssueComments(repoFullName, number));
     }
 
 }

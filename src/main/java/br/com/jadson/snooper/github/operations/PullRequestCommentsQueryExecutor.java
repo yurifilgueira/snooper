@@ -8,7 +8,10 @@ import org.springframework.web.client.RestTemplate;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 
 /**
  * This returns the Pull request review comments
@@ -35,7 +38,9 @@ public class PullRequestCommentsQueryExecutor extends AbstractGitHubQueryExecuto
      *
      * @param repoFullName
      * @return
+     * @deprecated use {@link #fetchPullRequestsComments(String)}, which fetches the pages in parallel
      */
+    @Deprecated(since = "3.0")
     public List<GithubCommentsInfo> getPullCommentsInfo(String repoFullName) {
 
         int page = 1;
@@ -82,7 +87,9 @@ public class PullRequestCommentsQueryExecutor extends AbstractGitHubQueryExecuto
      *
      * @param repoFullName
      * @return
+     * @deprecated use {@link #fetchPullRequestComments(String, long)}, or {@link #fetchPullRequestComments(String, Collection)} for many PRs in parallel
      */
+    @Deprecated(since = "3.0")
     public List<GithubCommentsInfo> getPullCommentsInfo(String repoFullName, long prNumber) {
 
         int page = 1;
@@ -123,6 +130,35 @@ public class PullRequestCommentsQueryExecutor extends AbstractGitHubQueryExecuto
 
         return allComments;
 
+    }
+
+    // @HttpExchange methods: pages and PRs are fetched in parallel on virtual threads
+
+    // Return all PR review comments of a repository
+    public List<GithubCommentsInfo> fetchPullRequestsComments(String repoFullName) {
+        String owner = owner(repoFullName), name = name(repoFullName);
+        PageParams params = pageParams();
+
+        System.out.println("Fetching review comments of " + repoFullName);
+        return fetchAllPages(page -> clients().rest().listReviewComments(owner, name, params.forPage(page)));
+    }
+
+    // Return all review comments of a PR
+    public List<GithubCommentsInfo> fetchPullRequestComments(String repoFullName, long prNumber) {
+        String owner = owner(repoFullName), name = name(repoFullName);
+        PageParams params = pageParams();
+
+        return fetchAllPages(page -> clients().rest().listReviewCommentsOfPullRequest(owner, name, prNumber, params.forPage(page)));
+    }
+
+    /**
+        Return the review comments of many PRs. The PRs and their pages are fetched in parallel.
+
+        @return PR number -> review comments, in the order of the numbers
+     */
+    public Map<Long, List<GithubCommentsInfo>> fetchPullRequestComments(String repoFullName, Collection<Long> prNumbers) {
+        System.out.println("Fetching review comments of " + prNumbers.size() + " pull requests of " + repoFullName);
+        return fetchEach(new LinkedHashSet<>(prNumbers), number -> fetchPullRequestComments(repoFullName, number));
     }
 
 }

@@ -59,6 +59,10 @@ public class IssueQueryExecutor extends AbstractGitHubQueryExecutor{
         super(githubToken);
     }
 
+    /**
+     * @deprecated use {@link #fetchIssues(String, String)}, which fetches the pages in parallel
+     */
+    @Deprecated(since = "3.0")
     public List<GitHubIssueInfo> issues(String repoOwner, String repoName) {
         return issues(repoOwner+"/"+repoName);
     }
@@ -68,7 +72,9 @@ public class IssueQueryExecutor extends AbstractGitHubQueryExecutor{
      *
      * @param repoFullName
      * @return
+     * @deprecated use {@link #fetchIssues(String)}, which fetches the pages in parallel
      */
+    @Deprecated(since = "3.0")
     public List<GitHubIssueInfo> issues(String repoFullName) {
 
         validateRepoName(repoFullName);
@@ -114,7 +120,9 @@ public class IssueQueryExecutor extends AbstractGitHubQueryExecutor{
      *
      * @param repoFullName
      * @return
+     * @deprecated use {@link #fetchIssue(String, int)}
      */
+    @Deprecated(since = "3.0")
     public GitHubIssueInfo issue(String repoFullName, int issueNumber) {
 
         validateRepoName(repoFullName);
@@ -143,7 +151,9 @@ public class IssueQueryExecutor extends AbstractGitHubQueryExecutor{
      * @param start
      * @param end
      * @return
+     * @deprecated use {@link #fetchIssuesCreatedInPeriod(String, LocalDateTime, LocalDateTime)}
      */
+    @Deprecated(since = "3.0")
     public List<GitHubIssueInfo> issuesCreatedInPeriod(String repoFullName, LocalDateTime start, LocalDateTime end) {
 
         List<GitHubIssueInfo> issues = new ArrayList();
@@ -173,7 +183,9 @@ public class IssueQueryExecutor extends AbstractGitHubQueryExecutor{
      * @param start
      * @param end
      * @return
+     * @deprecated use {@link #fetchIssuesClosedInPeriod(String, LocalDateTime, LocalDateTime)}
      */
+    @Deprecated(since = "3.0")
     public List<GitHubIssueInfo> issuesClosedInPeriod(String repoFullName, LocalDateTime start, LocalDateTime end) {
 
         List<GitHubIssueInfo> issues = new ArrayList();
@@ -204,7 +216,9 @@ public class IssueQueryExecutor extends AbstractGitHubQueryExecutor{
      *
      * @param repoFullName
      * @return
+     * @deprecated use {@link #fetchQtdIssues(String)}
      */
+    @Deprecated(since = "3.0")
     public int getQtdIssues(String repoFullName) {
 
         validateRepoName(repoFullName);
@@ -225,6 +239,46 @@ public class IssueQueryExecutor extends AbstractGitHubQueryExecutor{
         ResponseEntity<GitHubQTDPullRequestInfo> result = restTemplate.exchange( uri, HttpMethod.GET, entity, GitHubQTDPullRequestInfo.class);
 
         return result.getBody().total_count;
+    }
+
+    // @HttpExchange methods: pages are fetched in parallel on virtual threads
+
+    public List<GitHubIssueInfo> fetchIssues(String repoOwner, String repoName) {
+        return fetchIssues(repoOwner + "/" + repoName);
+    }
+
+    /**
+        Return all issues of a project. Pages after the first one are fetched in parallel.
+
+        GitHub returns pull requests in this endpoint too (they have the pull_request field).
+        Use setQueryParameters(new String[]{"state=all"}) to bring closed issues too.
+     */
+    public List<GitHubIssueInfo> fetchIssues(String repoFullName) {
+        String owner = owner(repoFullName), name = name(repoFullName);
+        PageParams params = pageParams();
+
+        System.out.println("Fetching issues of " + repoFullName);
+        return fetchAllPages(page -> clients().rest().listIssues(owner, name, params.forPage(page)));
+    }
+
+    // Return a specific issue. Here we get more information, as the user that closed the issue
+    public GitHubIssueInfo fetchIssue(String repoFullName, int issueNumber) {
+        return clients().rest().getIssue(owner(repoFullName), name(repoFullName), issueNumber);
+    }
+
+    // Return the issues created between the dates (inclusive)
+    public List<GitHubIssueInfo> fetchIssuesCreatedInPeriod(String repoFullName, LocalDateTime start, LocalDateTime end) {
+        return filterByDate(fetchIssues(repoFullName), issue -> issue.created_at, start, end);
+    }
+
+    // Return the issues closed between the dates (inclusive)
+    public List<GitHubIssueInfo> fetchIssuesClosedInPeriod(String repoFullName, LocalDateTime start, LocalDateTime end) {
+        return filterByDate(fetchIssues(repoFullName), issue -> issue.closed_at, start, end);
+    }
+
+    // Return the qtd of ISSUES of a project, using the search API (it has its own rate limit, 30 requests per minute)
+    public int fetchQtdIssues(String repoFullName) {
+        return clients().rest().searchIssues("type:issue repo:" + owner(repoFullName) + "/" + name(repoFullName), 1).total_count;
     }
 
 }
