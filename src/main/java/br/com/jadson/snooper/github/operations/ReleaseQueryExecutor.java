@@ -52,11 +52,20 @@ public class ReleaseQueryExecutor extends AbstractGitHubQueryExecutor {
         super(githubToken);
     }
 
+    /**
+     * @deprecated use {@link #fetchReleases(String, String)}, which fetches the pages in parallel
+     */
+    @Deprecated(since = "3.0")
     public List<GitHubReleaseInfo> releases(String repoOwner, String repoName) {
         return releases(repoOwner+"/"+repoName);
     }
 
 
+    /**
+     * @deprecated use {@link #fetchReleases(String)}, which fetches the pages in parallel
+     * and waits for the rate limit reset instead of sleeping 30 minutes every 5000 pages
+     */
+    @Deprecated(since = "3.0")
     public List<GitHubReleaseInfo> releases(String repoFullName) {
 
         validateRepoName(repoFullName);
@@ -108,6 +117,25 @@ public class ReleaseQueryExecutor extends AbstractGitHubQueryExecutor {
         }while ( result != null && result.getBody().length > 0 && ! testEnvironment);
 
         return all;
+    }
+
+    // @HttpExchange methods
+
+    public List<GitHubReleaseInfo> fetchReleases(String repoOwner, String repoName) {
+        return fetchReleases(repoOwner + "/" + repoName);
+    }
+
+    /**
+        Return all releases of a repository. Pages after the first one are fetched in parallel.
+
+        The rate limit is handled by the client: requests wait for the reset time of GitHub when the quota runs out.
+     */
+    public List<GitHubReleaseInfo> fetchReleases(String repoFullName) {
+        String owner = owner(repoFullName), name = name(repoFullName);
+        PageParams params = pageParams();
+
+        System.out.println("Fetching releases of " + repoFullName);
+        return fetchAllPages(page -> clients().rest().listReleases(owner, name, params.forPage(page)));
     }
 
 }

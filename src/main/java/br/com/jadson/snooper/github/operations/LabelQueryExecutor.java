@@ -56,7 +56,9 @@ public class LabelQueryExecutor extends AbstractGitHubQueryExecutor{
      *     "default": false
      *   }
      * ]
+     * @deprecated use {@link #fetchLabels(String)}, which fetches the pages in parallel
      */
+    @Deprecated(since = "3.0")
     public List<LabelInfo> labels(String repoFullName) {
 
         validateRepoName(repoFullName);
@@ -94,5 +96,15 @@ public class LabelQueryExecutor extends AbstractGitHubQueryExecutor{
         }while ( result != null && result.getBody().length > 0   && !testEnvironment);
 
         return all;
+    }
+
+    // @HttpExchange methods
+
+    // Return all labels of a repository. Pages after the first one are fetched in parallel
+    public List<LabelInfo> fetchLabels(String repoFullName) {
+        String owner = owner(repoFullName), name = name(repoFullName);
+        PageParams params = pageParams();
+
+        return fetchAllPages(page -> clients().rest().listLabels(owner, name, params.forPage(page)));
     }
 }

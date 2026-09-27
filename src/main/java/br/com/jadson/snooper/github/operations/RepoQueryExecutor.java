@@ -36,7 +36,10 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.client.RestTemplate;
 
+import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Return information about repository of github
@@ -59,7 +62,9 @@ public class RepoQueryExecutor extends AbstractGitHubQueryExecutor{
      * @param repoOwner
      * @param repoName
      * @return
+     * @deprecated use {@link #fetchRepoInfo(String, String)}
      */
+    @Deprecated(since = "3.0")
     public GitHubRepoInfo getRepoInfo(String repoOwner, String repoName) {
         return getRepoInfo(repoOwner+"/"+repoName);
     }
@@ -69,7 +74,9 @@ public class RepoQueryExecutor extends AbstractGitHubQueryExecutor{
      *
      * @param repoFullName
      * @return
+     * @deprecated use {@link #fetchRepoInfo(String)}, or {@link #fetchRepoInfos(Collection)} for many repositories in parallel
      */
+    @Deprecated(since = "3.0")
     public GitHubRepoInfo getRepoInfo(String repoFullName) {
 
         ResponseEntity<GitHubRepoInfo> result;
@@ -93,7 +100,9 @@ public class RepoQueryExecutor extends AbstractGitHubQueryExecutor{
      * @param repoFullName
      * @param branch
      * @return
+     * @deprecated use {@link #fetchAllFiles(String, String)}
      */
+    @Deprecated(since = "3.0")
     public GitHubTreeInfo getAllFiles(String repoFullName, String branch){
         ResponseEntity<GitHubTreeInfo> result;
         String url = GIT_HUB_API_URL +
@@ -104,6 +113,35 @@ public class RepoQueryExecutor extends AbstractGitHubQueryExecutor{
 
         result = restTemplate.exchange(url, HttpMethod.GET, entity, GitHubTreeInfo.class);
         return result.getBody();
+    }
+
+    // @HttpExchange methods
+
+    public GitHubRepoInfo fetchRepoInfo(String repoOwner, String repoName) {
+        return fetchRepoInfo(repoOwner + "/" + repoName);
+    }
+
+    // Return all information about a GitHub repository
+    public GitHubRepoInfo fetchRepoInfo(String repoFullName) {
+        return clients().rest().getRepo(owner(repoFullName), name(repoFullName));
+    }
+
+    /**
+        Return the information of many repositories, fetched in parallel (one request per repository).
+
+        @return repo full name -> information, in the order of the names
+     */
+    public Map<String, GitHubRepoInfo> fetchRepoInfos(Collection<String> repoFullNames) {
+        return fetchEach(new LinkedHashSet<>(repoFullNames), this::fetchRepoInfo);
+    }
+
+    /**
+        Return all files and directories of a branch (recursive tree).
+
+        GitHub truncates trees with more than 100,000 entries or 7 MB, so very large repositories come incomplete.
+     */
+    public GitHubTreeInfo fetchAllFiles(String repoFullName, String branch) {
+        return clients().rest().getTree(owner(repoFullName), name(repoFullName), branch, 1);
     }
 
 }
