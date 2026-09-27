@@ -19,6 +19,7 @@ Until the moment, these APIs are supported by Snooper
  - 1.0 - Github Search
  - 1.8 - CodeCov Support
  - 2.0 - Github Actions and Coveralls Support
+ - 3.0 - Concurrent GitHub mining with virtual threads and `@HttpExchange` clients (requires Java 21)
 
 #### Authors:
 
@@ -27,9 +28,10 @@ Until the moment, these APIs are supported by Snooper
     
 ### Dependencies
     
-    Java 11
-    Gradle 5.2.1
-    Junit 5.6.0
+    Java 21
+    Gradle 9.1 (wrapper included, runs on JDK 17+ and compiles with a JDK 21 toolchain)
+    Spring Web 6.2 (RestClient and @HttpExchange)
+    Junit 5.11
     
 ### How do I get set up?
 
@@ -43,6 +45,75 @@ Until the moment, these APIs are supported by Snooper
    
    Include it on your classpath.    
     
+
+### Concurrent mining (3.0)
+
+Since version 3.0 the GitHub executors have `fetch*` methods. They do the same queries as the old methods,
+but fetch pages and items in parallel on virtual threads, so mining a large repository is limited by the GitHub rate limits
+instead of by the time of each request.
+
+ - **Pages in parallel**: the first page is fetched, the `Link` header tells how many pages exist, and the other pages are fetched at the same time.
+ - **Batch methods**: `fetchCommitFiles`, `fetchPullRequestDiffs`, `fetchPullRequestComments`, `fetchIssueComments`,
+   `fetchRepoInfos` and `fetchUsers` receive a list and fetch one item per request in parallel. They return a `Map` in the order of the input.
+ - **Commits with stats (GraphQL)**: `fetchCommitsWithStats` splits the period in date windows fetched in parallel.
+ - **Concurrency limit**: at most 10 requests of the same token run at the same time, no matter how many executors or repositories are being mined.
+ - **Rate limit**: when the quota of the token is almost over, requests wait for the reset time of GitHub.
+   Secondary limits (403/429) are retried after `Retry-After`. Core, search and GraphQL quotas are tracked separately.
+ - **One client per token**: executors with the same token share the HTTP connections, the rate limit and the concurrency limit.
+   A token that receives 401 (revoked or expired) is removed from the cache.
+
+```
+    // change the concurrency limit of a token (default 10)
+    GitHubClientFactory.forToken(githubToken).fetcher().setMaxConcurrency(20);
+
+    // remove the clients of a token (after changing it, for example)
+    GitHubClientFactory.evict(githubToken);
+    GitHubClientFactory.clear();
+
+    // mine several repositories at the same time with the same token
+    try (ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor()) {
+        for (String repo : List.of("jadsonjs/snooper", "spring-projects/spring-framework")) {
+            pool.submit(() -> {
+                CommitQueryExecutor executor = new CommitQueryExecutor();
+                executor.setGithubToken(githubToken);
+                return executor.fetchCommits(repo);
+            });
+        }
+    }
+```
+
+A token has 5,000 REST requests per hour. Fetching the files of each commit costs one request per commit,
+so the files of 5,000 commits use the whole hourly quota (the requests wait for the reset instead of failing).
+To read only the commit history of a big repository, cloning it with `CloneGitHubExecutor` and reading it locally is faster and uses no quota.
+
+#### Migrating from 2.x
+
+The old GitHub methods still work but are `@Deprecated(since = "3.0")`. Each one points to its replacement:
+
+| 2.x (deprecated)                                  | 3.0                                                   |
+|---------------------------------------------------|-------------------------------------------------------|
+| `CommitQueryExecutor.getCommits`                  | `fetchCommits`                                        |
+| `CommitQueryExecutor.getCommitsWithStats`         | `fetchCommitsWithStats`                               |
+| `CommitQueryExecutor.getCommitFiles`              | `fetchCommitFiles` (one commit or a list of commits)  |
+| `CommitQueryExecutor.getHistoryOfCommitsWithPullRequestsQuery` | `fetchHistoryOfCommitsWithPullRequests` (default branch instead of `master`) |
+| `PullRequestQueryExecutor.pullRequests`           | `fetchPullRequests`                                   |
+| `PullRequestDiffQueryExecutor.pullRequestsDiff`   | `fetchPullRequestDiff` / `fetchPullRequestDiffs`      |
+| `IssueQueryExecutor.issues`                       | `fetchIssues`                                         |
+| `IssueCommentsQueryExecutor.getIssueCommentsInfo` | `fetchIssueComments`                                  |
+| `PullRequestCommentsQueryExecutor.getPullCommentsInfo` | `fetchPullRequestComments`                       |
+| `LabelQueryExecutor.labels`                       | `fetchLabels`                                         |
+| `ReleaseQueryExecutor.releases`                   | `fetchReleases`                                       |
+| `RepoQueryExecutor.getRepoInfo` / `getAllFiles`   | `fetchRepoInfo` / `fetchRepoInfos` / `fetchAllFiles`  |
+| `UserQueryExecutor.user`                          | `fetchUser` / `fetchUsers`                            |
+
+The other methods follow the same pattern (`getQtdPullRequests` -> `fetchQtdPullRequests`, `issuesCreatedInPeriod` -> `fetchIssuesCreatedInPeriod`, ...).
+
+Other differences of the new methods:
+ - GraphQL errors throw `IllegalStateException` with the message of GitHub (the old methods failed with `NullPointerException`).
+ - The comments methods use the parameters of `setQueryParameters` (the old ones ignored them).
+ - `fetchPullRequestDiff` reads `/pulls/{number}`, the endpoint that returns the diff statistics.
+ - GitHub Actions, GitLab, Sonar Cloud, CodeCov, Coveralls and Travis CI executors were not changed yet.
+
 
 ### How to use
 
@@ -72,42 +143,64 @@ Examples of how to use:
      CommitQueryExecutor executor = new CommitQueryExecutor();
      executor.setGithubToken(githubToken);
      executor.setPageSize(100);
-     List<GitHubCommitInfo> commits = executor.getCommits("jadsonjs/snooper");
+     List<GitHubCommitInfo> commits = executor.fetchCommits("jadsonjs/snooper");
+
+
+# Get the files changed by each commit (one request per commit, in parallel)
+
+     Map<String, List<GitHubFileChanged>> filesBySha = executor.fetchCommitFiles("jadsonjs/snooper", commits);
+
+
+# Get the commits with additions, deletions and changed files between dates (GraphQL)
+
+     List<GitHubCommitStatsInfo> stats = executor.fetchCommitsWithStats("jadsonjs/snooper",
+             LocalDateTime.of(2023, 1, 1, 0, 0), LocalDateTime.of(2023, 12, 31, 0, 0));
 
 
 # Get all Pull Requests of a repository
 
-    PullRequestQueryExecutor executor = new PullRequestQueryExecutor();
+    PullRequestQueryExecutor executor = new PullRequestQueryExecutor(githubToken);
     executor.setPageSize(100);
     executor.setQueryParameters(new String[]{"state=all"});
     
-    List<GitHubPullRequestInfo> list =  executor.pullRequests("jadsonjs/snooper");
+    List<GitHubPullRequestInfo> list =  executor.fetchPullRequests("jadsonjs/snooper");
+
+
+# Get the review comments of many Pull Requests (in parallel)
+
+    PullRequestCommentsQueryExecutor comments = new PullRequestCommentsQueryExecutor(githubToken);
+    Map<Long, List<GithubCommentsInfo>> commentsByPr = comments.fetchPullRequestComments("jadsonjs/snooper", List.of(1L, 2L, 3L));
 
 
 
 # Get all Issues of a repository
 
-    IssueQueryExecutor executor = new IssueQueryExecutor();
+    IssueQueryExecutor executor = new IssueQueryExecutor(githubToken);
     executor.setPageSize(100);
     executor.setQueryParameters(new String[]{"state=all"});
     
-    List<GitHubIssueInfo> list =  executor.pullRequests("jadsonjs/snooper");
+    List<GitHubIssueInfo> list =  executor.fetchIssues("jadsonjs/snooper");
     
     
 
 # Get all Releases of a repository
 
-    ReleaseQueryExecutor executor = new ReleaseQueryExecutor(" git hub access token ");
+    ReleaseQueryExecutor executor = new ReleaseQueryExecutor(githubToken);
     executor.setPageSize(100);
-    executor.setQueryParameters(new String[]{"state=all"});
-    List<GitHubReleaseInfo> list =  executor.releases("jadsonjs/snooper");
+    List<GitHubReleaseInfo> list =  executor.fetchReleases("jadsonjs/snooper");
 
 
 
-# Get a pull request diff info
+# Get a pull request diff info (additions, deletions, changed files)
 
-    PullRequestDiffQuery gitHub = new PullRequestDiffQuery(" git hub access token ");
-    GitHubPullRequestDiffInfo info =  gitHub.pullRequestsDiff("jadsonjs/snooper", 5356l);
+    PullRequestDiffQueryExecutor executor = new PullRequestDiffQueryExecutor(githubToken);
+    GitHubPullRequestDiffInfo info =  executor.fetchPullRequestDiff("jadsonjs/snooper", 5356L);
+
+
+# Get the profile of many users (the commit authors, for example) in parallel
+
+    UserQueryExecutor executor = new UserQueryExecutor(githubToken);
+    Map<String, GitHubUserInfo> users = executor.fetchUsers(List.of("jadsonjs", "octocat"));
 
 
 
