@@ -29,6 +29,10 @@
  */
 package br.com.jadson.snooper.github.data.association.graphql;
 
+import br.com.jadson.snooper.github.data.GraphQLError;
+
+import java.util.List;
+
 /**
  * TODO
  * Jadson Santos - jadsonjs@gmail.com
@@ -36,6 +40,8 @@ package br.com.jadson.snooper.github.data.association.graphql;
 public class ResultGraphQLRepository {
 
     public ResultDataRepository data;
+
+    public List<GraphQLError> errors;
 
     @Override
     public String toString() {

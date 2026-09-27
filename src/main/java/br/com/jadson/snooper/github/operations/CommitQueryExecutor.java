@@ -29,6 +29,8 @@
  */
 package br.com.jadson.snooper.github.operations;
 
+import br.com.jadson.snooper.github.client.GitHubGraphQLApi;
+import br.com.jadson.snooper.github.data.GraphQLError;
 import br.com.jadson.snooper.github.data.association.AssociationCommitPullRequestInfo;
 import br.com.jadson.snooper.github.data.association.PullRequestNodeInfo;
 import br.com.jadson.snooper.github.data.association.graphql.AssociatedPullRequestsEdge;
@@ -40,6 +42,7 @@ import br.com.jadson.snooper.github.data.stats.GitHubFileStats;
 import br.com.jadson.snooper.github.data.stats.GitHubCommitStatsInfo;
 import br.com.jadson.snooper.github.data.stats.graphql.CommitStatsNode;
 import br.com.jadson.snooper.github.data.stats.graphql.GraphQLCommitResponse;
+import br.com.jadson.snooper.github.data.stats.graphql.History;
 import br.com.jadson.snooper.github.data.stats.mapper.GitHubCommitStatsMapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -49,10 +52,13 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.client.RestTemplate;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.concurrent.Callable;
 
 /**
  * Executes queries of commits
@@ -69,7 +75,9 @@ public class CommitQueryExecutor extends AbstractGitHubQueryExecutor {
      *
      * @param repoFullName
      * @return
+     * @deprecated use {@link #fetchCommits(String)}, which fetches the pages in parallel
      */
+    @Deprecated(since = "3.0")
     public List<GitHubCommitInfo> getCommits(String repoFullName) {
 
         validateRepoName(repoFullName);
@@ -123,7 +131,9 @@ public class CommitQueryExecutor extends AbstractGitHubQueryExecutor {
      * @param repoFullName
      * @param ref a branch or a tag name
      * @return all commits form a branch or tag
+     * @deprecated use {@link #fetchCommitOfReference(String, String)}
      */
+    @Deprecated(since = "3.0")
     public GitHubCommitInfo getCommitsOfReference(String repoFullName, String ref) {
 
         validateRepoName(repoFullName);
@@ -169,7 +179,9 @@ public class CommitQueryExecutor extends AbstractGitHubQueryExecutor {
      *
      * @param repoFullName
      * @return
+     * @deprecated use {@link #fetchCommitsOfPullRequest(String, long)}, which fetches the pages in parallel
      */
+    @Deprecated(since = "3.0")
     public List<GitHubCommitInfo> commitsOfPullRequest(String repoFullName, long prNumber) {
 
         validateRepoName(repoFullName);
@@ -223,7 +235,9 @@ public class CommitQueryExecutor extends AbstractGitHubQueryExecutor {
      * This method use the API V4 of github with GraphQL
      * @param projectFullName
      * @return
+     * @deprecated use {@link #fetchHistoryOfCommitsWithPullRequests(String)}
      */
+    @Deprecated(since = "3.0")
     public List<AssociationCommitPullRequestInfo> getHistoryOfCommitsWithPullRequestsQuery(String projectFullName) {
 
         final int pageSize = 100;
@@ -327,7 +341,9 @@ public class CommitQueryExecutor extends AbstractGitHubQueryExecutor {
      * @param sinceDate
      * @param untilDate
      * @return
+     * @deprecated use {@link #fetchCommitsWithStats(String, LocalDateTime, LocalDateTime)}, which fetches date windows in parallel
      */
+    @Deprecated(since = "3.0")
     public List<GitHubCommitStatsInfo> getCommitsWithStats(String projectFullName, LocalDateTime sinceDate, LocalDateTime untilDate) {
         validateRepoName(projectFullName);
 
@@ -407,7 +423,9 @@ public class CommitQueryExecutor extends AbstractGitHubQueryExecutor {
      * @param repoFullName
      * @param commit
      * @return
+     * @deprecated use {@link #fetchCommitFiles(String, GitHubCommitInfo)}, or {@link #fetchCommitFiles(String, List)} for many commits in parallel
      */
+    @Deprecated(since = "3.0")
     public List<GitHubFileChanged> getCommitFiles(String repoFullName, GitHubCommitInfo commit){
         validateRepoName(repoFullName);
         // IMPORTANTE state=all for bring all PR
@@ -441,7 +459,9 @@ public class CommitQueryExecutor extends AbstractGitHubQueryExecutor {
      * @param sinceDate
      * @param untilDate
      * @return
+     * @deprecated use {@link #fetchFileStats(String, String, LocalDateTime, LocalDateTime)}
      */
+    @Deprecated(since = "3.0")
     public GitHubFileStats getFileStats(String projectFullName, String filePath, LocalDateTime sinceDate, LocalDateTime untilDate){
         validateRepoName(projectFullName);
 
@@ -537,6 +557,246 @@ public class CommitQueryExecutor extends AbstractGitHubQueryExecutor {
             e.printStackTrace();
             System.err.println("--------------------------------------------------------------------------");
         }
+        return result;
+    }
+
+    // @HttpExchange methods: pages and items are fetched in parallel on virtual threads
+
+    private static final int GRAPHQL_PAGE_SIZE = 100;
+
+    private static final String COMMIT_STATS_FIELDS =
+            "oid id url comments { totalCount } " +
+            "author { user { url login } name email date avatarUrl } " +
+            "committer { user { url login } name email date } " +
+            "additions deletions changedFiles: changedFilesIfAvailable message";
+
+    private static final String COMMITS_WITH_STATS_QUERY =
+            "query($owner: String!, $name: String!, $since: GitTimestamp!, $until: GitTimestamp!, $after: String) { " +
+            "  repository(owner: $owner, name: $name) { defaultBranchRef { target { ... on Commit { " +
+            "    history(since: $since, until: $until, first: " + GRAPHQL_PAGE_SIZE + ", after: $after) { " +
+            "      totalCount pageInfo { endCursor hasNextPage } nodes { " + COMMIT_STATS_FIELDS + " } " +
+            "    } " +
+            "  } } } } " +
+            "}";
+
+    private static final String FILE_STATS_QUERY =
+            "query($owner: String!, $name: String!, $path: String!, $since: GitTimestamp!, $until: GitTimestamp!) { " +
+            "  repository(owner: $owner, name: $name) { defaultBranchRef { target { ... on Commit { " +
+            "    history(path: $path, since: $since, until: $until) { totalCount } " +
+            "  } } } } " +
+            "}";
+
+    private static final String COMMITS_WITH_PULL_REQUESTS_QUERY =
+            "query($owner: String!, $name: String!, $expression: String!, $after: String) { " +
+            "  repository(owner: $owner, name: $name) { object(expression: $expression) { ... on Commit { " +
+            "    history(first: " + GRAPHQL_PAGE_SIZE + ", after: $after) { " +
+            "      pageInfo { hasNextPage endCursor } " +
+            "      nodes { commitUrl associatedPullRequests(first: 20) { edges { node { id number } } } } " +
+            "    } " +
+            "  } } } " +
+            "}";
+
+    /**
+        Return all commits of a project. Pages after the first one are fetched in parallel.
+
+        Get the commits between dates with setQueryParameters: since=2021-03-01T22:26:45Z, until=2021-04-08T22:26:45Z
+
+        @param repoFullName owner/repo
+        @return the commits, newest first
+     */
+    public List<GitHubCommitInfo> fetchCommits(String repoFullName) {
+        String owner = owner(repoFullName), name = name(repoFullName);
+        PageParams params = pageParams();
+
+        System.out.println("Fetching commits of " + repoFullName);
+        return fetchAllPages(page -> clients().rest().listCommits(owner, name, params.forPage(page)));
+    }
+
+    /**
+        Return the commit of a reference (a sha, a branch or a tag), with its files.
+
+        https://docs.github.com/en/rest/commits/commits?apiVersion=2022-11-28#get-a-commit
+     */
+    public GitHubCommitInfo fetchCommitOfReference(String repoFullName, String ref) {
+        return clients().rest().getCommit(owner(repoFullName), name(repoFullName), ref, pageParams().forPage(1));
+    }
+
+    // Return all commits of a pull request. Pages after the first one are fetched in parallel
+    public List<GitHubCommitInfo> fetchCommitsOfPullRequest(String repoFullName, long prNumber) {
+        String owner = owner(repoFullName), name = name(repoFullName);
+        PageParams params = pageParams();
+
+        return fetchAllPages(page -> clients().rest().listCommitsOfPullRequest(owner, name, prNumber, params.forPage(page)));
+    }
+
+    // Return the files changed in a commit
+    public List<GitHubFileChanged> fetchCommitFiles(String repoFullName, GitHubCommitInfo commit) {
+        GitHubCommitInfo detail = clients().rest().getCommit(owner(repoFullName), name(repoFullName), commit.sha);
+        return detail != null && detail.files != null ? detail.files : new ArrayList<>();
+    }
+
+    /**
+        Return the files changed in each commit, fetching the commits in parallel.
+
+        Each commit costs one request: 5,000 commits use the whole hourly quota of a token.
+        The requests wait for the rate limit reset instead of failing.
+
+        @return sha -> changed files, in the order of the commits
+     */
+    public Map<String, List<GitHubFileChanged>> fetchCommitFiles(String repoFullName, List<GitHubCommitInfo> commits) {
+        String owner = owner(repoFullName), name = name(repoFullName);
+
+        List<String> shas = new ArrayList<>();
+        for (GitHubCommitInfo commit : commits)
+            shas.add(commit.sha);
+
+        System.out.println("Fetching files of " + shas.size() + " commits of " + repoFullName);
+        return fetchEach(new LinkedHashSet<>(shas), sha -> {
+            GitHubCommitInfo detail = clients().rest().getCommit(owner, name, sha);
+            return detail != null && detail.files != null ? detail.files : new ArrayList<GitHubFileChanged>();
+        });
+    }
+
+    /**
+        Return the commits of the default branch with their change statistics (GraphQL).
+
+        The period is split in windows fetched in parallel, each one walking its own cursor.
+        Windows overlap on their borders and commits are de-duplicated by sha.
+
+        @return the commits, newest first
+     */
+    public List<GitHubCommitStatsInfo> fetchCommitsWithStats(String projectFullName, LocalDateTime sinceDate, LocalDateTime untilDate) {
+        String owner = owner(projectFullName), name = name(projectFullName);
+
+        Instant since = sinceDate.toLocalDate().atStartOfDay().toInstant(ZoneOffset.UTC);
+        Instant until = untilDate.plusDays(1).toLocalDate().atStartOfDay().toInstant(ZoneOffset.UTC);
+
+        System.out.println("Fetching commits with stats of " + projectFullName + " from " + since + " to " + until);
+
+        // the first page tells how many commits the period has
+        History first = commitStatsPage(owner, name, since, until, null);
+        if (first == null)
+            return new ArrayList<>();
+
+        if (!Boolean.TRUE.equals(first.pageInfo.hasNextPage) || testEnvironment)
+            return toStatsInfo(first.nodes);
+
+        int pages = (first.totalCount + GRAPHQL_PAGE_SIZE - 1) / GRAPHQL_PAGE_SIZE;
+        int windows = Math.max(1, Math.min(pages, clients().fetcher().getMaxConcurrency()));
+
+        // newest window first, so the result keeps the history order
+        Duration windowSize = Duration.between(since, until).dividedBy(windows);
+        List<Callable<List<CommitStatsNode>>> tasks = new ArrayList<>();
+        for (int i = windows - 1; i >= 0; i--) {
+            Instant windowSince = since.plus(windowSize.multipliedBy(i));
+            Instant windowUntil = i == windows - 1 ? until : since.plus(windowSize.multipliedBy(i + 1));
+            tasks.add(() -> allCommitStats(owner, name, windowSince, windowUntil));
+        }
+
+        Map<String, CommitStatsNode> bySha = new LinkedHashMap<>();
+        for (List<CommitStatsNode> window : clients().fetcher().fetchAll(tasks))
+            for (CommitStatsNode node : window)
+                bySha.putIfAbsent(node.oid, node);
+
+        return toStatsInfo(new ArrayList<>(bySha.values()));
+    }
+
+    // Return how many commits changed a file in the period (GraphQL)
+    public GitHubFileStats fetchFileStats(String projectFullName, String filePath, LocalDateTime sinceDate, LocalDateTime untilDate) {
+        Map<String, Object> variables = new HashMap<>();
+        variables.put("owner", owner(projectFullName));
+        variables.put("name", name(projectFullName));
+        variables.put("path", filePath);
+        variables.put("since", sinceDate.toLocalDate().atStartOfDay().toInstant(ZoneOffset.UTC).toString());
+        variables.put("until", untilDate.plusDays(1).toLocalDate().atStartOfDay().toInstant(ZoneOffset.UTC).toString());
+
+        GraphQLCommitResponse response = clients().graphQL().queryCommitStats(new GitHubGraphQLApi.Request(FILE_STATS_QUERY, variables));
+        GraphQLError.throwIfAny(response.errors);
+
+        GitHubFileStats gitHubFileStats = new GitHubFileStats();
+        gitHubFileStats.path = filePath;
+        gitHubFileStats.commits = historyOf(response) != null ? historyOf(response).totalCount : 0;
+        return gitHubFileStats;
+    }
+
+    /**
+        Return the history of commits of the default branch with the pull requests associated to each commit (GraphQL).
+
+        Unlike getHistoryOfCommitsWithPullRequestsQuery, it reads the default branch (not "master")
+        and has no limit of 100 pages. The cursor is sequential, so pages are not fetched in parallel.
+     */
+    public List<AssociationCommitPullRequestInfo> fetchHistoryOfCommitsWithPullRequests(String projectFullName) {
+        Map<String, Object> variables = new HashMap<>();
+        variables.put("owner", owner(projectFullName));
+        variables.put("name", name(projectFullName));
+        variables.put("expression", "HEAD");
+
+        List<AssociationCommitPullRequestInfo> results = new ArrayList<>();
+        String cursor = null;
+
+        do {
+            variables.put("after", cursor);
+            ResultGraphQLRepository response = clients().graphQL()
+                    .queryAssociatedPullRequests(new GitHubGraphQLApi.Request(COMMITS_WITH_PULL_REQUESTS_QUERY, variables));
+            GraphQLError.throwIfAny(response.errors);
+
+            if (response.data == null || response.data.repository == null || response.data.repository.object == null
+                    || response.data.repository.object.history == null)
+                break;
+
+            br.com.jadson.snooper.github.data.association.graphql.History history = response.data.repository.object.history;
+            for (CommitNode commitNode : history.nodes) {
+                AssociationCommitPullRequestInfo association = new AssociationCommitPullRequestInfo();
+                association.commitUrl = commitNode.commitUrl;
+                for (AssociatedPullRequestsEdge edge : commitNode.associatedPullRequests.edges)
+                    association.addPullRequestInfo(new PullRequestNodeInfo(edge.node.id, edge.node.number));
+                results.add(association);
+            }
+
+            cursor = Boolean.TRUE.equals(history.pageInfo.hasNextPage) && !testEnvironment ? history.pageInfo.endCursor : null;
+        } while (cursor != null);
+
+        return results;
+    }
+
+    // Walks the cursor of one window until its last page
+    private List<CommitStatsNode> allCommitStats(String owner, String name, Instant since, Instant until) {
+        List<CommitStatsNode> nodes = new ArrayList<>();
+        String cursor = null;
+        do {
+            History history = commitStatsPage(owner, name, since, until, cursor);
+            if (history == null)
+                break;
+            nodes.addAll(history.nodes);
+            cursor = Boolean.TRUE.equals(history.pageInfo.hasNextPage) ? history.pageInfo.endCursor : null;
+        } while (cursor != null);
+        return nodes;
+    }
+
+    private History commitStatsPage(String owner, String name, Instant since, Instant until, String cursor) {
+        Map<String, Object> variables = new HashMap<>();
+        variables.put("owner", owner);
+        variables.put("name", name);
+        variables.put("since", since.toString());
+        variables.put("until", until.toString());
+        variables.put("after", cursor);
+
+        GraphQLCommitResponse response = clients().graphQL().queryCommitStats(new GitHubGraphQLApi.Request(COMMITS_WITH_STATS_QUERY, variables));
+        GraphQLError.throwIfAny(response.errors);
+        return historyOf(response);
+    }
+
+    private static History historyOf(GraphQLCommitResponse response) {
+        if (response == null || response.data == null || response.data.repository == null
+                || response.data.repository.defaultBranchRef == null || response.data.repository.defaultBranchRef.target == null)
+            return null;
+        return response.data.repository.defaultBranchRef.target.history;
+    }
+
+    private static List<GitHubCommitStatsInfo> toStatsInfo(List<CommitStatsNode> nodes) {
+        List<GitHubCommitStatsInfo> result = new ArrayList<>();
+        for (CommitStatsNode node : nodes)
+            result.add(GitHubCommitStatsMapper.mapToCommitStatsInfo(node));
         return result;
     }
 
